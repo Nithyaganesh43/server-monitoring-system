@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin:'http://localhost:3000',
     credentials: true,
   })
 );
@@ -30,7 +30,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY;
 
 // Database Models
@@ -165,7 +165,7 @@ app.post('/auth/request', async (req, res) => {
     );
 
     // Send verification email
-    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${verificationToken}`;
+    const verificationUrl = `http://localhost:3000/verify?token=${verificationToken}`;
 
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -237,9 +237,9 @@ app.post('/auth/verify', async (req, res) => {
     // Set cookie
     res.cookie('authToken', permanentToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      sameSite: 'strict',
+      sameSite: 'None',
     });
 
     res.json({ message: 'Device verified successfully', verified: true });
@@ -274,9 +274,9 @@ app.get('/auth/isVerified', async (req, res) => {
       const permanentToken = generateToken(email, deviceId);
       res.cookie('authToken', permanentToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         maxAge: 30 * 24 * 60 * 60 * 1000,
-        sameSite: 'strict',
+        sameSite: 'None',
       });
       return res.json({ verified: true });
     }
@@ -516,7 +516,7 @@ const startServerMonitoring = () => {
 
           // Send alert email if not already sent
           if (!server.alertSent) {
-            const restartUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/restart/${server._id}`;
+            const restartUrl = `http://localhost:3000/restart/${server._id}`;
 
             const alertHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
