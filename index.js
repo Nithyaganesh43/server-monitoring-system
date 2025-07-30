@@ -9,8 +9,7 @@ const cron = require('node-cron');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
+const PORT = process.env.PORT || 3000; 
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
@@ -22,7 +21,7 @@ app.use(
 );
 
 // Email transporter setup
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_ID,
@@ -166,9 +165,7 @@ app.post('/auth/request', async (req, res) => {
     );
 
     // Send verification email
-    const verificationUrl = `${
-      process.env.FRONTEND_URL || 'http://localhost:3000'
-    }/verify?token=${verificationToken}`;
+    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${verificationToken}`;
 
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -519,9 +516,7 @@ const startServerMonitoring = () => {
 
           // Send alert email if not already sent
           if (!server.alertSent) {
-            const restartUrl = `${
-              process.env.FRONTEND_URL || 'http://localhost:3000'
-            }/restart/${server._id}`;
+            const restartUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/restart/${server._id}`;
 
             const alertHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -529,12 +524,8 @@ const startServerMonitoring = () => {
                 <p><strong>Server Down:</strong> ${server.url}</p>
                 <p><strong>Index:</strong> ${server.index}</p>
                 <p><strong>Failed at:</strong> ${new Date().toLocaleString()}</p>
-                <p><strong>Response time:</strong> ${
-                  pingResult.responseTime
-                }ms</p>
-                <p><strong>Error:</strong> ${
-                  pingResult.error || 'Server unreachable'
-                }</p>
+                <p><strong>Response time:</strong> ${pingResult.responseTime}ms</p>
+                <p><strong>Error:</strong> ${pingResult.error || 'Server unreachable'}</p>
                 
                 <div style="margin: 20px 0;">
                   <a href="${restartUrl}" 
