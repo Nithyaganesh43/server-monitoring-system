@@ -165,7 +165,7 @@ app.post('/auth/request', async (req, res) => {
     );
 
     // Send verification email
-    const verificationUrl = `http://localhost:3000/verify?token=${verificationToken}`;
+    const verificationUrl = `https://watchtower-24-7.vercel.app/verify?token=${verificationToken}`;
 
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -516,7 +516,7 @@ const startServerMonitoring = () => {
 
           // Send alert email if not already sent
           if (!server.alertSent) {
-            const restartUrl = `http://localhost:3000/restart/${server._id}`;
+            const restartUrl = `https://watchtower-24-7.vercel.app/restart/${server._id}`;
 
             const alertHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
