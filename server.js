@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin:'http://localhost:3000',
+    origin: 'https://watchtower-24-7.vercel.app',
     credentials: true,
   })
 );
