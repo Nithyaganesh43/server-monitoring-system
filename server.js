@@ -21,8 +21,8 @@ app.use(
   })
 );
 
-// Email transporter setup
-const transporter = nodemailer.createTransporter({
+// Email transporter setup - FIXED: createTransport instead of createTransporter
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_ID,
