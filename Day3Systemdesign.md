@@ -4,3 +4,10 @@
 
 ## importance of software architecture
 
+## layered architecture 
+organization 
+separation of concerns
+dependencies
+
+# dao pattern 
+

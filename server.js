@@ -22,7 +22,7 @@ app.use(
 );
 
 // Email transporter setup
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_ID,
@@ -114,15 +114,33 @@ const generateToken = (email, deviceId) => {
 
 const sendEmail = async (to, subject, html) => {
   try {
-    await transporter.sendMail({
+    console.log(`Attempting to send email to: ${to}`);
+    console.log(`Email subject: ${subject}`);
+
+    const mailOptions = {
       from: process.env.EMAIL_ID,
       to,
       subject,
       html,
-    });
-    console.log(`Email sent to ${to}`);
+    };
+
+    const result = await transporter.sendMail(mailOptions);
+    console.log(
+      `✅ Email sent successfully to ${to}, MessageId: ${result.messageId}`
+    );
+    return result;
   } catch (error) {
-    console.error('Email sending failed:', error);
+    console.error(`❌ Email sending failed to ${to}:`, error);
+
+    // Log specific error details
+    if (error.code) {
+      console.error(`Error code: ${error.code}`);
+    }
+    if (error.response) {
+      console.error(`SMTP Response: ${error.response}`);
+    }
+
+    throw error; // Re-throw to handle in calling function
   }
 };
 
@@ -440,11 +458,9 @@ app.post('/server/new', authenticateToken, async (req, res) => {
     });
 
     if (serverCount >= req.user.maxServerCount) {
-      return res
-        .status(400)
-        .json({
-          error: `Maximum server limit (${req.user.maxServerCount}) reached`,
-        });
+      return res.status(400).json({
+        error: `Maximum server limit (${req.user.maxServerCount}) reached`,
+      });
     }
 
     // Get next index
@@ -466,6 +482,9 @@ app.post('/server/new', authenticateToken, async (req, res) => {
 
     // Initial ping
     const pingResult = await pingServer(url);
+    console.log(
+      `Initial ping for ${url}: Success=${pingResult.success}, ResponseTime=${pingResult.responseTime}ms`
+    );
 
     // Update server with ping result
     const updateData = {
@@ -482,7 +501,8 @@ app.post('/server/new', authenticateToken, async (req, res) => {
       updateData.lastFailureTime = new Date();
     }
 
-    await updateServerWithRetry(server._id, updateData);
+    const updatedServer = await updateServerWithRetry(server._id, updateData);
+    console.log(`Server ${url} status updated to: ${updateData.status}`);
 
     // Create ping history record
     await PingHistory.create({
@@ -494,13 +514,13 @@ app.post('/server/new', authenticateToken, async (req, res) => {
       errorMessage: pingResult.errorMessage,
     });
 
-    const updatedServer = await Server.findById(server._id).select(
+    const finalServer = await Server.findById(server._id).select(
       'url index status responseTime uptime pingCount totalPings successfulPings alert'
     );
 
     res.json({
       message: 'Server added successfully',
-      server: updatedServer,
+      server: finalServer,
     });
   } catch (error) {
     console.error('Add server error:', error);
@@ -588,37 +608,87 @@ app.put('/server/edit/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// FIXED DELETE ROUTE - Proper ownership check and session handling
 app.delete('/server/delete/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid server ID format' });
+    }
+
+    // First, verify the server exists and belongs to the user
+    const serverToDelete = await Server.findOne({
+      _id: id,
+      userEmail: req.user.email,
+      isActive: true,
+    });
+
+    if (!serverToDelete) {
+      return res
+        .status(404)
+        .json({ error: 'Server not found or access denied' });
+    }
+
     const session = await mongoose.startSession();
 
     try {
+      let deletedServer = null;
+
       await session.withTransaction(async () => {
-        // Soft delete server
-        const server = await Server.findOneAndUpdate(
-          { _id: id, userEmail: req.user.email },
-          { isActive: false },
-          { new: true, session }
+        // Soft delete the server with proper ownership check
+        deletedServer = await Server.findOneAndUpdate(
+          {
+            _id: id,
+            userEmail: req.user.email,
+            isActive: true,
+          },
+          {
+            isActive: false,
+            $inc: { version: 1 },
+          },
+          {
+            new: true,
+            session,
+          }
         );
 
-        if (!server) {
-          throw new Error('Server not found');
+        if (!deletedServer) {
+          throw new Error('Server not found or access denied');
         }
 
-        // Optionally delete associated ping history
-        await PingHistory.deleteMany({ serverId: id }).session(session);
+        // Delete associated ping history to save space
+        const deleteResult = await PingHistory.deleteMany({
+          serverId: id,
+        }).session(session);
+
+        console.log(
+          `Deleted ${deleteResult.deletedCount} ping history records for server ${id}`
+        );
+      });
+
+      console.log(
+        `Successfully deleted server: ${deletedServer.url} (ID: ${id}) for user: ${req.user.email}`
+      );
+
+      res.json({
+        message: 'Server deleted successfully',
+        deletedServer: {
+          id: deletedServer._id,
+          url: deletedServer.url,
+          index: deletedServer.index,
+        },
       });
     } finally {
       await session.endSession();
     }
-
-    res.json({ message: 'Server deleted successfully' });
   } catch (error) {
     console.error('Delete server error:', error);
-    if (error.message === 'Server not found') {
-      return res.status(404).json({ error: 'Server not found' });
+    if (error.message === 'Server not found or access denied') {
+      return res
+        .status(404)
+        .json({ error: 'Server not found or access denied' });
     }
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -759,14 +829,15 @@ const startServerMonitoring = () => {
           const { serverId, server, pingResult } = result.value;
 
           // Calculate new uptime
-          const newTotalPings = server.totalPings + 1;
+          const newTotalPings = (server.totalPings || 0) + 1;
           const newSuccessfulPings =
-            server.successfulPings + (pingResult.success ? 1 : 0);
-          const newUptime = (newSuccessfulPings / newTotalPings) * 100;
+            (server.successfulPings || 0) + (pingResult.success ? 1 : 0);
+          const newUptime =
+            newTotalPings > 0 ? (newSuccessfulPings / newTotalPings) * 100 : 0;
 
           // Prepare server update
           const updateData = {
-            pingCount: server.pingCount + 1,
+            pingCount: (server.pingCount || 0) + 1,
             totalPings: newTotalPings,
             successfulPings: newSuccessfulPings,
             lastPingTime: new Date(),
@@ -776,16 +847,23 @@ const startServerMonitoring = () => {
           };
 
           if (pingResult.success) {
-            updateData.alertSent = false; // Reset alert when server comes back online
+            // Reset alert when server comes back online
+            if (server.alertSent) {
+              updateData.alertSent = false;
+            }
           } else {
             updateData.lastFailureTime = new Date();
 
-            // Check if alert should be sent
-            if (server.alert && !server.alertSent) {
+            // Check if alert should be sent - FIXED LOGIC
+            if (server.alert === true && server.alertSent === false) {
+              console.log(
+                `Preparing alert for server ${server.url} - alert: ${server.alert}, alertSent: ${server.alertSent}`
+              );
               emailAlerts.push({
                 userEmail: server.userEmail,
-                server,
-                pingResult,
+                server: server,
+                pingResult: pingResult,
+                serverId: serverId,
               });
               updateData.alertSent = true;
             }
@@ -815,9 +893,20 @@ const startServerMonitoring = () => {
         // Execute bulk operations
         if (serverUpdates.length > 0) {
           try {
-            await Server.bulkWrite(serverUpdates, { ordered: false });
+            const bulkResult = await Server.bulkWrite(serverUpdates, {
+              ordered: false,
+            });
+            console.log(
+              `Bulk server updates: ${bulkResult.modifiedCount} modified, ${bulkResult.upsertedCount} upserted`
+            );
           } catch (error) {
             console.error('Bulk server update error:', error);
+            // Log individual update failures
+            if (error.writeErrors) {
+              error.writeErrors.forEach((writeError) => {
+                console.error(`Failed to update server: ${writeError.err}`);
+              });
+            }
           }
         }
 
@@ -832,7 +921,10 @@ const startServerMonitoring = () => {
         // Send email alerts
         for (const alertData of emailAlerts) {
           try {
-            const restartUrl = `https://watchtower-24-7.vercel.app/restart/${alertData.server._id}`;
+            console.log(
+              `Sending alert email for server: ${alertData.server.url}`
+            );
+            const restartUrl = `https://watchtower-24-7.vercel.app/restart/${alertData.serverId}`;
 
             const alertHtml = `
               <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -843,7 +935,7 @@ const startServerMonitoring = () => {
                 <p><strong>Response time:</strong> ${alertData.pingResult.responseTime}ms</p>
                 <p><strong>Status Code:</strong> ${alertData.pingResult.statusCode || 'No Response'}</p>
                 <p><strong>Error:</strong> ${alertData.pingResult.errorMessage || 'Server unreachable'}</p>
-                <p><strong>Uptime:</strong> ${alertData.server.uptime?.toFixed(2) || 0}%</p>
+                <p><strong>Current Uptime:</strong> ${(alertData.server.uptime || 0).toFixed(2)}%</p>
                 
                 <div style="margin: 20px 0;">
                   <a href="${restartUrl}" 
@@ -865,9 +957,14 @@ const startServerMonitoring = () => {
               alertHtml
             );
 
-            console.log(`Alert sent for server: ${alertData.server.url}`);
+            console.log(
+              `✅ Alert email sent successfully for server: ${alertData.server.url}`
+            );
           } catch (error) {
-            console.error('Error sending alert email:', error);
+            console.error(
+              `❌ Error sending alert email for ${alertData.server.url}:`,
+              error
+            );
           }
         }
 
@@ -1237,6 +1334,7 @@ connectToDb()
       console.log('  • Batch processing for monitoring');
       console.log('  • Database connection pooling');
       console.log('  • Comprehensive error handling');
+      console.log('  • Fixed server deletion with proper ownership checks');
     });
   })
   .catch((error) => {
