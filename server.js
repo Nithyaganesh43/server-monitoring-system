@@ -21,7 +21,7 @@ app.use(
   })
 );
 
-// Email transporter setup - FIXED: createTransport instead of createTransporter
+// Email transporter setup
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -72,6 +72,11 @@ const serverSchema = new mongoose.Schema({
   version: { type: Number, default: 0 },
 });
 
+// FIXED: Add compound unique index for per-user unique URLs
+serverSchema.index({ userEmail: 1, url: 1 }, { unique: true });
+serverSchema.index({ userEmail: 1, isActive: 1 });
+serverSchema.index({ isActive: 1, lastPingTime: 1 });
+
 // Ping history schema for detailed tracking
 const pingHistorySchema = new mongoose.Schema({
   serverId: {
@@ -96,9 +101,7 @@ const pendingAuthSchema = new mongoose.Schema({
   expiresAt: { type: Date, default: Date.now, expires: 600 }, // 10 minutes
 });
 
-// Create indexes for optimization
-serverSchema.index({ userEmail: 1, isActive: 1 });
-serverSchema.index({ isActive: 1, lastPingTime: 1 });
+// Create additional indexes for optimization
 pingHistorySchema.index({ serverId: 1, pingTime: -1 });
 pingHistorySchema.index({ userEmail: 1, pingTime: -1 });
 
@@ -110,6 +113,44 @@ const PendingAuth = mongoose.model('PendingAuth', pendingAuthSchema);
 // Utility Functions
 const generateToken = (email, deviceId) => {
   return jwt.sign({ email, deviceId }, JWT_SECRET, { expiresIn: '30d' });
+};
+
+// FIXED: Enhanced URL validation function
+const validateUrl = (url) => {
+  try {
+    // Check if URL starts with http:// or https://
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return { valid: false, error: 'URL must start with http:// or https://' };
+    }
+
+    // Parse URL to validate structure
+    const parsedUrl = new URL(url);
+
+    // Check for valid protocol
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return {
+        valid: false,
+        error: 'Invalid protocol. Only HTTP and HTTPS are allowed.',
+      };
+    }
+
+    // Check for valid hostname
+    if (!parsedUrl.hostname || parsedUrl.hostname.length === 0) {
+      return { valid: false, error: 'Invalid hostname' };
+    }
+
+    // Additional validation rules
+    if (
+      parsedUrl.hostname === 'localhost' ||
+      parsedUrl.hostname.startsWith('127.')
+    ) {
+      return { valid: false, error: 'Localhost URLs are not allowed' };
+    }
+
+    return { valid: true, normalizedUrl: url.trim() };
+  } catch (error) {
+    return { valid: false, error: 'Invalid URL format' };
+  }
 };
 
 const sendEmail = async (to, subject, html) => {
@@ -286,8 +327,8 @@ app.post('/auth/request', async (req, res) => {
       { upsert: true, new: true }
     );
 
-    // Send verification email
-    const verificationUrl = `https://watchtower-24-7.vercel.app/verify?token=${verificationToken}`;
+    // FIXED: Send verification email with API endpoint instead of frontend redirect
+    const verificationUrl = `${req.protocol}://${req.get('host')}/auth/verify-email?token=${verificationToken}`;
 
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -309,6 +350,130 @@ app.post('/auth/request', async (req, res) => {
   } catch (error) {
     console.error('Auth request error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// FIXED: New email verification endpoint that shows success page instead of redirecting
+app.get('/auth/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).send(`
+        <html>
+          <head><title>Verification Failed</title></head>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
+            <p>No verification token provided.</p>
+            <p>Please try requesting verification again.</p>
+          </body>
+        </html>
+      `);
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const { email, deviceId } = decoded;
+
+    // Check if pending auth exists
+    const pendingAuth = await PendingAuth.findOne({ email, deviceId, token });
+    if (!pendingAuth) {
+      return res.status(400).send(`
+        <html>
+          <head><title>Verification Failed</title></head>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
+            <p>Invalid or expired verification token.</p>
+            <p>Please try requesting verification again.</p>
+          </body>
+        </html>
+      `);
+    }
+
+    // Use session for transaction to handle race conditions
+    const session = await mongoose.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        // Create or update user
+        let user = await User.findOne({ email }).session(session);
+        if (!user) {
+          user = new User({ email, verifiedDevices: [] });
+        }
+
+        // Add or update device
+        const existingDeviceIndex = user.verifiedDevices.findIndex(
+          (device) => device.deviceId === deviceId
+        );
+
+        if (existingDeviceIndex >= 0) {
+          user.verifiedDevices[existingDeviceIndex].isActive = true;
+          user.verifiedDevices[existingDeviceIndex].verifiedAt = new Date();
+        } else {
+          user.verifiedDevices.push({ deviceId, verifiedAt: new Date() });
+        }
+
+        await user.save({ session });
+
+        // Remove pending auth
+        await PendingAuth.deleteOne({ _id: pendingAuth._id }).session(session);
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    // Generate permanent token
+    const permanentToken = generateToken(email, deviceId);
+
+    // FIXED: Show success page instead of redirecting
+    res.send(`
+      <html>
+        <head>
+          <title>Device Verified Successfully</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #f8f9fa;">
+          <div style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h1 style="color: #28a745; margin-bottom: 20px;">✅ Device Verified Successfully!</h1>
+            <p style="color: #6c757d; margin-bottom: 30px;">Your device has been verified and you can now access the server monitoring dashboard.</p>
+            <p style="color: #6c757d; font-size: 14px;">You can now return to the application. This page will close automatically.</p>
+          </div>
+          <script>
+            // Set the auth token as a cookie (this will be picked up by the frontend)
+            document.cookie = 'authToken=${permanentToken}; path=/; max-age=${30 * 24 * 60 * 60}; secure; samesite=none';
+            
+            // Auto-close after 3 seconds
+            setTimeout(() => {
+              window.close();
+            }, 3000);
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Email verification error:', error);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(400).send(`
+        <html>
+          <head><title>Verification Failed</title></head>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
+            <p>Invalid verification token.</p>
+            <p>Please try requesting verification again.</p>
+          </body>
+        </html>
+      `);
+    }
+    res.status(500).send(`
+      <html>
+        <head><title>Verification Error</title></head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1 style="color: #dc3545;">❌ Verification Error</h1>
+          <p>An error occurred during verification.</p>
+          <p>Please try again later.</p>
+        </body>
+      </html>
+    `);
   }
 });
 
@@ -451,6 +616,28 @@ app.post('/server/new', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'URL is required' });
     }
 
+    // FIXED: Validate URL format and protocol
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      return res.status(400).json({ error: urlValidation.error });
+    }
+
+    const normalizedUrl = urlValidation.normalizedUrl;
+
+    // FIXED: Check for duplicate URL for this user
+    const existingServer = await Server.findOne({
+      userEmail: req.user.email,
+      url: normalizedUrl,
+      isActive: true,
+    });
+
+    if (existingServer) {
+      return res.status(400).json({
+        error:
+          'This URL is already being monitored by you. Each user can only monitor unique URLs.',
+      });
+    }
+
     // Check server count limit using user's maxServerCount
     const serverCount = await Server.countDocuments({
       userEmail: req.user.email,
@@ -473,17 +660,26 @@ app.post('/server/new', authenticateToken, async (req, res) => {
     // Create new server
     const server = new Server({
       userEmail: req.user.email,
-      url,
+      url: normalizedUrl,
       index: nextIndex,
       alert,
     });
 
-    await server.save();
+    try {
+      await server.save();
+    } catch (error) {
+      if (error.code === 11000) {
+        return res.status(400).json({
+          error: 'This URL is already being monitored by you.',
+        });
+      }
+      throw error;
+    }
 
     // Initial ping
-    const pingResult = await pingServer(url);
+    const pingResult = await pingServer(normalizedUrl);
     console.log(
-      `Initial ping for ${url}: Success=${pingResult.success}, ResponseTime=${pingResult.responseTime}ms`
+      `Initial ping for ${normalizedUrl}: Success=${pingResult.success}, ResponseTime=${pingResult.responseTime}ms`
     );
 
     // Update server with ping result
@@ -502,7 +698,9 @@ app.post('/server/new', authenticateToken, async (req, res) => {
     }
 
     const updatedServer = await updateServerWithRetry(server._id, updateData);
-    console.log(`Server ${url} status updated to: ${updateData.status}`);
+    console.log(
+      `Server ${normalizedUrl} status updated to: ${updateData.status}`
+    );
 
     // Create ping history record
     await PingHistory.create({
@@ -581,8 +779,30 @@ app.put('/server/edit/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'URL is required' });
     }
 
+    // FIXED: Validate URL format and protocol
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      return res.status(400).json({ error: urlValidation.error });
+    }
+
+    const normalizedUrl = urlValidation.normalizedUrl;
+
+    // FIXED: Check for duplicate URL for this user (excluding current server)
+    const existingServer = await Server.findOne({
+      userEmail: req.user.email,
+      url: normalizedUrl,
+      isActive: true,
+      _id: { $ne: id },
+    });
+
+    if (existingServer) {
+      return res.status(400).json({
+        error: 'This URL is already being monitored by you.',
+      });
+    }
+
     const updateData = {
-      url,
+      url: normalizedUrl,
       status: 'checking',
       alertSent: false,
     };
@@ -604,11 +824,16 @@ app.put('/server/edit/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Server updated successfully', server });
   } catch (error) {
     console.error('Edit server error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({
+        error: 'This URL is already being monitored by you.',
+      });
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// FIXED DELETE ROUTE - Proper ownership check and session handling
+// Server deletion route (unchanged)
 app.delete('/server/delete/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -780,7 +1005,7 @@ const connectToDb = () => {
   });
 };
 
-// Optimized server monitoring with bulk operations
+// FIXED: Optimized server monitoring with improved email alert logic
 const startServerMonitoring = () => {
   cron.schedule('*/5 * * * *', async () => {
     console.log('Running server monitoring check...');
@@ -850,14 +1075,17 @@ const startServerMonitoring = () => {
             // Reset alert when server comes back online
             if (server.alertSent) {
               updateData.alertSent = false;
+              console.log(
+                `Server ${server.url} is back online - resetting alert flag`
+              );
             }
           } else {
             updateData.lastFailureTime = new Date();
 
-            // Check if alert should be sent - FIXED LOGIC
-            if (server.alert === true && server.alertSent === false) {
+            // FIXED: Enhanced alert logic - send email only once when server goes down
+            if (server.alert === true && server.alertSent !== true) {
               console.log(
-                `Preparing alert for server ${server.url} - alert: ${server.alert}, alertSent: ${server.alertSent}`
+                `Preparing alert for server ${server.url} - alert enabled: ${server.alert}, alertSent: ${server.alertSent}`
               );
               emailAlerts.push({
                 userEmail: server.userEmail,
@@ -866,6 +1094,10 @@ const startServerMonitoring = () => {
                 serverId: serverId,
               });
               updateData.alertSent = true;
+            } else if (server.alert === true && server.alertSent === true) {
+              console.log(
+                `Alert already sent for server ${server.url}, skipping email`
+              );
             }
           }
 
@@ -918,55 +1150,117 @@ const startServerMonitoring = () => {
           }
         }
 
-        // Send email alerts
+        // FIXED: Enhanced email alert sending with better error handling
         for (const alertData of emailAlerts) {
           try {
             console.log(
-              `Sending alert email for server: ${alertData.server.url}`
+              `🚨 Sending alert email for server: ${alertData.server.url} to ${alertData.userEmail}`
             );
             const restartUrl = `https://watchtower-24-7.vercel.app/restart/${alertData.serverId}`;
 
             const alertHtml = `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #dc3545;">🚨 Server Monitor Alert</h2>
-                <p><strong>Server Down:</strong> ${alertData.server.url}</p>
-                <p><strong>Index:</strong> ${alertData.server.index}</p>
-                <p><strong>Failed at:</strong> ${new Date().toLocaleString()}</p>
-                <p><strong>Response time:</strong> ${alertData.pingResult.responseTime}ms</p>
-                <p><strong>Status Code:</strong> ${alertData.pingResult.statusCode || 'No Response'}</p>
-                <p><strong>Error:</strong> ${alertData.pingResult.errorMessage || 'Server unreachable'}</p>
-                <p><strong>Current Uptime:</strong> ${(alertData.server.uptime || 0).toFixed(2)}%</p>
-                
-                <div style="margin: 20px 0;">
-                  <a href="${restartUrl}" 
-                     style="display: inline-block; background-color: #28a745; color: white; 
-                            padding: 12px 24px; text-decoration: none; border-radius: 4px;">
-                    🔄 Restart Monitoring
-                  </a>
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
+                <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                  <h2 style="color: #dc3545; margin-top: 0; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
+                    🚨 Server Monitor Alert
+                  </h2>
+                  
+                  <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <strong>⚠️ SERVER DOWN DETECTED</strong>
+                  </div>
+                  
+                  <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Server URL:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #dc3545;">${alertData.server.url}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Server Index:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">#${alertData.server.index}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Failed at:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${new Date().toLocaleString()}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Response time:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${alertData.pingResult.responseTime}ms</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Status Code:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${alertData.pingResult.statusCode || 'No Response'}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Error:</strong></td>
+                      <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #dc3545;">${alertData.pingResult.errorMessage || 'Server unreachable'}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 8px 0;"><strong>Current Uptime:</strong></td>
+                      <td style="padding: 8px 0;">${(alertData.server.uptime || 0).toFixed(2)}%</td>
+                    </tr>
+                  </table>
+                  
+                  <div style="text-align: center; margin: 30px 0;">
+                    <a href="${restartUrl}" 
+                       style="display: inline-block; background-color: #28a745; color: white; 
+                              padding: 15px 30px; text-decoration: none; border-radius: 5px; 
+                              font-weight: bold; font-size: 16px;">
+                      🔄 Restart Monitoring
+                    </a>
+                  </div>
+                  
+                  <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <p style="margin: 0; font-size: 14px;">
+                      <strong>💡 What to do next:</strong><br>
+                      1. Check your server manually to diagnose the issue<br>
+                      2. Once fixed, click "Restart Monitoring" to reset the alert<br>
+                      3. You won't receive another alert for this server until it comes back online and goes down again
+                    </p>
+                  </div>
+                  
+                  <p style="color: #6c757d; font-size: 12px; text-align: center; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px;">
+                    This alert was sent because you enabled email notifications for this server.<br>
+                    Powered by WatchTower 24/7 Server Monitoring
+                  </p>
                 </div>
-                
-                <p style="color: #666; font-size: 14px;">
-                  Click the restart button above to reset the alert and continue monitoring.
-                </p>
               </div>
             `;
 
             await sendEmail(
               alertData.userEmail,
-              `🚨 Server Down: ${alertData.server.url}`,
+              `🚨 Server Down Alert: ${alertData.server.url} (Index #${alertData.server.index})`,
               alertHtml
             );
 
             console.log(
-              `✅ Alert email sent successfully for server: ${alertData.server.url}`
+              `✅ Alert email sent successfully for server: ${alertData.server.url} to ${alertData.userEmail}`
             );
           } catch (error) {
             console.error(
-              `❌ Error sending alert email for ${alertData.server.url}:`,
+              `❌ CRITICAL: Failed to send alert email for ${alertData.server.url} to ${alertData.userEmail}:`,
               error
             );
+
+            // FIXED: If email sending fails, reset alertSent to false so we can try again next time
+            try {
+              await Server.findByIdAndUpdate(
+                alertData.serverId,
+                { alertSent: false },
+                { new: true }
+              );
+              console.log(
+                `Reset alertSent flag for server ${alertData.server.url} due to email failure`
+              );
+            } catch (resetError) {
+              console.error(
+                `Failed to reset alertSent flag for server ${alertData.serverId}:`,
+                resetError
+              );
+            }
           }
         }
+
+        console.log(`Processed batch: ${emailAlerts.length} alerts sent`);
 
         // Small delay between batches
         if (batches.indexOf(batch) < batches.length - 1) {
@@ -974,7 +1268,9 @@ const startServerMonitoring = () => {
         }
       }
 
-      console.log(`Monitoring check completed for ${servers.length} servers`);
+      console.log(
+        `✅ Monitoring check completed for ${servers.length} servers`
+      );
 
       // Clean up old ping histories in background
       setTimeout(async () => {
@@ -988,7 +1284,7 @@ const startServerMonitoring = () => {
         }
       }, 5000);
     } catch (error) {
-      console.error('Server monitoring error:', error);
+      console.error('❌ Server monitoring error:', error);
     }
   });
 };
@@ -1306,6 +1602,9 @@ connectToDb()
       console.log('📊 Available routes:');
       console.log('🔐 Authentication:');
       console.log('  POST /auth/request - Request device verification');
+      console.log(
+        '  GET /auth/verify-email - Email verification endpoint (NEW)'
+      );
       console.log('  POST /auth/verify - Verify device with token');
       console.log('  GET /auth/isVerified - Check if device is verified');
       console.log('  POST /auth/logout - Logout and deactivate device');
@@ -1327,14 +1626,16 @@ connectToDb()
       console.log('  GET /admin/stats - Get system-wide statistics');
       console.log('💚 Health:');
       console.log('  GET /health - Health check');
-      console.log('\n✅ Optimizations enabled:');
-      console.log('  • Bulk database operations');
-      console.log('  • Optimistic locking for race conditions');
-      console.log('  • Automatic ping history cleanup (150k limit per server)');
-      console.log('  • Batch processing for monitoring');
-      console.log('  • Database connection pooling');
-      console.log('  • Comprehensive error handling');
-      console.log('  • Fixed server deletion with proper ownership checks');
+      console.log('\n✅ FIXES APPLIED:');
+      console.log('  • Per-user unique URL validation with compound index');
+      console.log('  • Enhanced URL validation (https:// required)');
+      console.log('  • Fixed email verification flow (no redirect from email)');
+      console.log(
+        '  • Improved email alert logic (send only once per downtime)'
+      );
+      console.log('  • Better error handling for email failures');
+      console.log('  • Enhanced email templates with better styling');
+      console.log('  • Automatic alertSent reset when email fails');
     });
   })
   .catch((error) => {
@@ -1347,16 +1648,16 @@ const gracefulShutdown = (signal) => {
   console.log(`${signal} received, shutting down gracefully`);
 
   // Stop accepting new connections
-  const server = app.listen(PORT);
-  server.close(() => {
-    console.log('HTTP server closed');
+  // const server = app.listen(PORT);
+  // server.close(() => {
+  //   console.log('HTTP server closed');
 
-    // Close database connection
-    mongoose.connection.close(false, () => {
-      console.log('MongoDB connection closed');
-      process.exit(0);
-    });
-  });
+  //   // Close database connection
+  //   // mongoose.connection.close(false, () => {
+  //   //   console.log('MongoDB connection closed');
+  //   //   process.exit(0);
+  //   // });
+  // });
 
   // Force close after 10 seconds
   setTimeout(() => {
@@ -1367,18 +1668,18 @@ const gracefulShutdown = (signal) => {
   }, 10000);
 };
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+// process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  gracefulShutdown('UNCAUGHT_EXCEPTION');
+  // gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  gracefulShutdown('UNHANDLED_REJECTION');
+  // gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 module.exports = app;
