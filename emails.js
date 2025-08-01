@@ -1,5 +1,4 @@
-// emails.js - Email templates and utilities
-
+ 
 const generateVerificationEmail = (verificationUrl) => {
   return `
     <!DOCTYPE html>
