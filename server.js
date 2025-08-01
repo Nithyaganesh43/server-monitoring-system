@@ -6,6 +6,12 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const axios = require('axios');
 const cron = require('node-cron');
+const {
+  generateVerificationEmail,
+  generateServerDownAlert,
+  generateSuccessPage,
+  generateErrorPage,
+} = require('./emails');
 require('dotenv').config();
 
 const app = express();
@@ -31,8 +37,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET;
-const ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY;
+const JWT_SECRET = process.env.JWT_SECRET; 
 
 // Database Models
 const userSchema = new mongoose.Schema({
@@ -60,7 +65,7 @@ const serverSchema = new mongoose.Schema({
   successfulPings: { type: Number, default: 0 },
   status: {
     type: String,
-    enum: ['online', 'offline', 'checking'],
+    enum: ['online', 'offline', 'checking', 'paused'],
     default: 'checking',
   },
   alert: { type: Boolean, default: false },
@@ -68,6 +73,10 @@ const serverSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   lastFailureTime: { type: Date },
   isActive: { type: Boolean, default: true },
+  // NEW FIELDS FOR 3-STRIKE SYSTEM
+  consecutiveFailures: { type: Number, default: 0 },
+  isPaused: { type: Boolean, default: false },
+  pausedAt: { type: Date },
   // Optimistic locking for race conditions
   version: { type: Number, default: 0 },
 });
@@ -76,6 +85,7 @@ const serverSchema = new mongoose.Schema({
 serverSchema.index({ userEmail: 1, url: 1 }, { unique: true });
 serverSchema.index({ userEmail: 1, isActive: 1 });
 serverSchema.index({ isActive: 1, lastPingTime: 1 });
+serverSchema.index({ isActive: 1, isPaused: 1 });
 
 // Ping history schema for detailed tracking
 const pingHistorySchema = new mongoose.Schema({
@@ -330,19 +340,7 @@ app.post('/auth/request', async (req, res) => {
     // FIXED: Send verification email with API endpoint instead of frontend redirect
     const verificationUrl = `${req.protocol}://${req.get('host')}/auth/verify-email?token=${verificationToken}`;
 
-    const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Server Monitor - Device Verification</h2>
-        <p>Click the button below to verify your device and access the server monitoring dashboard:</p>
-        <a href="${verificationUrl}" 
-           style="display: inline-block; background-color: #007bff; color: white; padding: 12px 24px; 
-                  text-decoration: none; border-radius: 4px; margin: 20px 0;">
-          Verify Device
-        </a>
-        <p>This link will expire in 10 minutes.</p>
-        <p>If you didn't request this verification, please ignore this email.</p>
-      </div>
-    `;
+    const emailHtml = generateVerificationEmail(verificationUrl);
 
     await sendEmail(email, 'Server Monitor - Verify Your Device', emailHtml);
 
@@ -359,16 +357,14 @@ app.get('/auth/verify-email', async (req, res) => {
     const { token } = req.query;
 
     if (!token) {
-      return res.status(400).send(`
-        <html>
-          <head><title>Verification Failed</title></head>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
-            <p>No verification token provided.</p>
-            <p>Please try requesting verification again.</p>
-          </body>
-        </html>
-      `);
+      return res
+        .status(400)
+        .send(
+          generateErrorPage(
+            'Verification Failed',
+            'No verification token provided. Please try requesting verification again.'
+          )
+        );
     }
 
     // Verify token
@@ -378,16 +374,14 @@ app.get('/auth/verify-email', async (req, res) => {
     // Check if pending auth exists
     const pendingAuth = await PendingAuth.findOne({ email, deviceId, token });
     if (!pendingAuth) {
-      return res.status(400).send(`
-        <html>
-          <head><title>Verification Failed</title></head>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
-            <p>Invalid or expired verification token.</p>
-            <p>Please try requesting verification again.</p>
-          </body>
-        </html>
-      `);
+      return res
+        .status(400)
+        .send(
+          generateErrorPage(
+            'Verification Failed',
+            'Invalid or expired verification token. Please try requesting verification again.'
+          )
+        );
     }
 
     // Use session for transaction to handle race conditions
@@ -426,54 +420,27 @@ app.get('/auth/verify-email', async (req, res) => {
     const permanentToken = generateToken(email, deviceId);
 
     // FIXED: Show success page instead of redirecting
-    res.send(`
-      <html>
-        <head>
-          <title>Device Verified Successfully</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #f8f9fa;">
-          <div style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            <h1 style="color: #28a745; margin-bottom: 20px;">✅ Device Verified Successfully!</h1>
-            <p style="color: #6c757d; margin-bottom: 30px;">Your device has been verified and you can now access the server monitoring dashboard.</p>
-            <p style="color: #6c757d; font-size: 14px;">You can now return to the application. This page will close automatically.</p>
-          </div>
-          <script>
-            // Set the auth token as a cookie (this will be picked up by the frontend)
-            document.cookie = 'authToken=${permanentToken}; path=/; max-age=${30 * 24 * 60 * 60}; secure; samesite=none';
-            
-            // Auto-close after 3 seconds
-            setTimeout(() => {
-              window.close();
-            }, 3000);
-          </script>
-        </body>
-      </html>
-    `);
+    res.send(generateSuccessPage(permanentToken));
   } catch (error) {
     console.error('Email verification error:', error);
     if (error.name === 'JsonWebTokenError') {
-      return res.status(400).send(`
-        <html>
-          <head><title>Verification Failed</title></head>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1 style="color: #dc3545;">❌ Verification Failed</h1>
-            <p>Invalid verification token.</p>
-            <p>Please try requesting verification again.</p>
-          </body>
-        </html>
-      `);
+      return res
+        .status(400)
+        .send(
+          generateErrorPage(
+            'Verification Failed',
+            'Invalid verification token. Please try requesting verification again.'
+          )
+        );
     }
-    res.status(500).send(`
-      <html>
-        <head><title>Verification Error</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <h1 style="color: #dc3545;">❌ Verification Error</h1>
-          <p>An error occurred during verification.</p>
-          <p>Please try again later.</p>
-        </body>
-      </html>
-    `);
+    res
+      .status(500)
+      .send(
+        generateErrorPage(
+          'Verification Error',
+          'An error occurred during verification. Please try again later.'
+        )
+      );
   }
 });
 
@@ -663,6 +630,8 @@ app.post('/server/new', authenticateToken, async (req, res) => {
       url: normalizedUrl,
       index: nextIndex,
       alert,
+      consecutiveFailures: 0,
+      isPaused: false,
     });
 
     try {
@@ -691,6 +660,7 @@ app.post('/server/new', authenticateToken, async (req, res) => {
       responseTime: pingResult.responseTime,
       status: pingResult.success ? 'online' : 'offline',
       uptime: pingResult.success ? 100 : 0,
+      consecutiveFailures: pingResult.success ? 0 : 1,
     };
 
     if (!pingResult.success) {
@@ -713,7 +683,7 @@ app.post('/server/new', authenticateToken, async (req, res) => {
     });
 
     const finalServer = await Server.findById(server._id).select(
-      'url index status responseTime uptime pingCount totalPings successfulPings alert'
+      'url index status responseTime uptime pingCount totalPings successfulPings alert consecutiveFailures isPaused'
     );
 
     res.json({
@@ -732,7 +702,7 @@ app.get('/server/data', authenticateToken, async (req, res) => {
       userEmail: req.user.email,
       isActive: true,
     }).select(
-      'url index status responseTime uptime pingCount totalPings successfulPings lastPingTime createdAt lastFailureTime alert alertSent'
+      'url index status responseTime uptime pingCount totalPings successfulPings lastPingTime createdAt lastFailureTime alert alertSent consecutiveFailures isPaused pausedAt'
     );
 
     // Get recent ping history for each server (last 24 hours)
@@ -805,6 +775,9 @@ app.put('/server/edit/:id', authenticateToken, async (req, res) => {
       url: normalizedUrl,
       status: 'checking',
       alertSent: false,
+      consecutiveFailures: 0,
+      isPaused: false,
+      pausedAt: null,
     };
 
     if (typeof alert !== 'undefined') {
@@ -815,7 +788,9 @@ app.put('/server/edit/:id', authenticateToken, async (req, res) => {
       { _id: id, userEmail: req.user.email, isActive: true },
       updateData,
       { new: true }
-    ).select('url index status responseTime uptime alert');
+    ).select(
+      'url index status responseTime uptime alert consecutiveFailures isPaused'
+    );
 
     if (!server) {
       return res.status(404).json({ error: 'Server not found' });
@@ -919,6 +894,7 @@ app.delete('/server/delete/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// MODIFIED: Restart route now resets the 3-strike system
 app.post('/server/restart/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -926,70 +902,22 @@ app.post('/server/restart/:id', authenticateToken, async (req, res) => {
     const server = await updateServerWithRetry(id, {
       alertSent: false,
       status: 'checking',
+      consecutiveFailures: 0,
+      isPaused: false,
+      pausedAt: null,
     });
 
     if (!server || server.userEmail !== req.user.email || !server.isActive) {
       return res.status(404).json({ error: 'Server not found' });
     }
 
+    console.log(
+      `Server monitoring restarted for: ${server.url} - Reset 3-strike counter`
+    );
+
     res.json({ message: 'Server monitoring restarted successfully' });
   } catch (error) {
     console.error('Restart server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Admin route to restart all servers for a user
-app.post('/admin/restart', async (req, res) => {
-  try {
-    const { adminKey, email } = req.body;
-
-    if (adminKey !== ADMIN_ACCESS_KEY) {
-      return res.status(401).json({ error: 'Invalid admin access key' });
-    }
-
-    const result = await Server.updateMany(
-      { userEmail: email, isActive: true },
-      { alertSent: false, status: 'checking' }
-    );
-
-    res.json({
-      message: 'All servers monitoring restarted successfully',
-      modifiedCount: result.modifiedCount,
-    });
-  } catch (error) {
-    console.error('Admin restart error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Admin route to update user max server count
-app.post('/admin/updateMaxServers', async (req, res) => {
-  try {
-    const { adminKey, email, maxServerCount } = req.body;
-
-    if (adminKey !== ADMIN_ACCESS_KEY) {
-      return res.status(401).json({ error: 'Invalid admin access key' });
-    }
-
-    if (!email || typeof maxServerCount !== 'number' || maxServerCount < 1) {
-      return res
-        .status(400)
-        .json({ error: 'Valid email and maxServerCount required' });
-    }
-
-    const user = await User.findOneAndUpdate(
-      { email },
-      { maxServerCount },
-      { new: true, upsert: true }
-    );
-
-    res.json({
-      message: 'User max server count updated successfully',
-      user: { email: user.email, maxServerCount: user.maxServerCount },
-    });
-  } catch (error) {
-    console.error('Admin update max servers error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1005,13 +933,17 @@ const connectToDb = () => {
   });
 };
 
-// FIXED: Optimized server monitoring with improved email alert logic
+// NEW: Enhanced server monitoring with 3-strike system
 const startServerMonitoring = () => {
   cron.schedule('*/5 * * * *', async () => {
     console.log('Running server monitoring check...');
 
     try {
-      const servers = await Server.find({ isActive: true }).lean();
+      // Only monitor servers that are active AND not paused
+      const servers = await Server.find({
+        isActive: true,
+        isPaused: false,
+      }).lean();
 
       if (servers.length === 0) {
         console.log('No active servers to monitor');
@@ -1060,6 +992,29 @@ const startServerMonitoring = () => {
           const newUptime =
             newTotalPings > 0 ? (newSuccessfulPings / newTotalPings) * 100 : 0;
 
+          // Calculate consecutive failures
+          let newConsecutiveFailures = server.consecutiveFailures || 0;
+          let shouldPause = false;
+          let shouldSendAlert = false;
+
+          if (pingResult.success) {
+            // Reset consecutive failures on success
+            newConsecutiveFailures = 0;
+          } else {
+            // Increment consecutive failures on failure
+            newConsecutiveFailures += 1;
+
+            // Check if we should pause after 3 failures
+            if (newConsecutiveFailures >= 3 && !server.isPaused) {
+              shouldPause = true;
+              shouldSendAlert =
+                server.alert === true && server.alertSent !== true;
+              console.log(
+                `🚨 Server ${server.url} failed 3 times - PAUSING monitoring`
+              );
+            }
+          }
+
           // Prepare server update
           const updateData = {
             pingCount: (server.pingCount || 0) + 1,
@@ -1069,9 +1024,19 @@ const startServerMonitoring = () => {
             responseTime: pingResult.responseTime,
             uptime: parseFloat(newUptime.toFixed(2)),
             status: pingResult.success ? 'online' : 'offline',
+            consecutiveFailures: newConsecutiveFailures,
           };
 
-          if (pingResult.success) {
+          if (shouldPause) {
+            updateData.isPaused = true;
+            updateData.pausedAt = new Date();
+            updateData.status = 'paused';
+            updateData.alertSent = true;
+          }
+
+          if (!pingResult.success) {
+            updateData.lastFailureTime = new Date();
+          } else {
             // Reset alert when server comes back online
             if (server.alertSent) {
               updateData.alertSent = false;
@@ -1079,26 +1044,18 @@ const startServerMonitoring = () => {
                 `Server ${server.url} is back online - resetting alert flag`
               );
             }
-          } else {
-            updateData.lastFailureTime = new Date();
+          }
 
-            // FIXED: Enhanced alert logic - send email only once when server goes down
-            if (server.alert === true && server.alertSent !== true) {
-              console.log(
-                `Preparing alert for server ${server.url} - alert enabled: ${server.alert}, alertSent: ${server.alertSent}`
-              );
-              emailAlerts.push({
-                userEmail: server.userEmail,
-                server: server,
-                pingResult: pingResult,
-                serverId: serverId,
-              });
-              updateData.alertSent = true;
-            } else if (server.alert === true && server.alertSent === true) {
-              console.log(
-                `Alert already sent for server ${server.url}, skipping email`
-              );
-            }
+          // Send alert only when pausing (after 3rd failure)
+          if (shouldSendAlert) {
+            console.log(`Preparing 3-strike alert for server ${server.url}`);
+            emailAlerts.push({
+              userEmail: server.userEmail,
+              server: server,
+              pingResult: pingResult,
+              serverId: serverId,
+              failureCount: newConsecutiveFailures,
+            });
           }
 
           serverUpdates.push({
@@ -1150,117 +1107,62 @@ const startServerMonitoring = () => {
           }
         }
 
-        // FIXED: Enhanced email alert sending with better error handling
+        // NEW: Send 3-strike alerts
         for (const alertData of emailAlerts) {
           try {
             console.log(
-              `🚨 Sending alert email for server: ${alertData.server.url} to ${alertData.userEmail}`
+              `🚨 Sending 3-strike alert email for server: ${alertData.server.url} to ${alertData.userEmail}`
             );
             const restartUrl = `https://watchtower-24-7.vercel.app/restart/${alertData.serverId}`;
 
-            const alertHtml = `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
-                <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                  <h2 style="color: #dc3545; margin-top: 0; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
-                    🚨 Server Monitor Alert
-                  </h2>
-                  
-                  <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 4px; margin: 20px 0;">
-                    <strong>⚠️ SERVER DOWN DETECTED</strong>
-                  </div>
-                  
-                  <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Server URL:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #dc3545;">${alertData.server.url}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Server Index:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">#${alertData.server.index}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Failed at:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${new Date().toLocaleString()}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Response time:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${alertData.pingResult.responseTime}ms</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Status Code:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${alertData.pingResult.statusCode || 'No Response'}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Error:</strong></td>
-                      <td style="padding: 8px 0; border-bottom: 1px solid #eee; color: #dc3545;">${alertData.pingResult.errorMessage || 'Server unreachable'}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px 0;"><strong>Current Uptime:</strong></td>
-                      <td style="padding: 8px 0;">${(alertData.server.uptime || 0).toFixed(2)}%</td>
-                    </tr>
-                  </table>
-                  
-                  <div style="text-align: center; margin: 30px 0;">
-                    <a href="${restartUrl}" 
-                       style="display: inline-block; background-color: #28a745; color: white; 
-                              padding: 15px 30px; text-decoration: none; border-radius: 5px; 
-                              font-weight: bold; font-size: 16px;">
-                      🔄 Restart Monitoring
-                    </a>
-                  </div>
-                  
-                  <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 4px; margin: 20px 0;">
-                    <p style="margin: 0; font-size: 14px;">
-                      <strong>💡 What to do next:</strong><br>
-                      1. Check your server manually to diagnose the issue<br>
-                      2. Once fixed, click "Restart Monitoring" to reset the alert<br>
-                      3. You won't receive another alert for this server until it comes back online and goes down again
-                    </p>
-                  </div>
-                  
-                  <p style="color: #6c757d; font-size: 12px; text-align: center; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px;">
-                    This alert was sent because you enabled email notifications for this server.<br>
-                    Powered by WatchTower 24/7 Server Monitoring
-                  </p>
-                </div>
-              </div>
-            `;
+            const alertHtml = generateServerDownAlert(
+              alertData.server,
+              alertData.pingResult,
+              restartUrl,
+              alertData.failureCount
+            );
 
             await sendEmail(
               alertData.userEmail,
-              `🚨 Server Down Alert: ${alertData.server.url} (Index #${alertData.server.index})`,
+              `🚨 Server Down Alert: ${alertData.server.url} (Failed ${alertData.failureCount} times)`,
               alertHtml
             );
 
             console.log(
-              `✅ Alert email sent successfully for server: ${alertData.server.url} to ${alertData.userEmail}`
+              `✅ 3-strike alert email sent successfully for server: ${alertData.server.url} to ${alertData.userEmail}`
             );
           } catch (error) {
             console.error(
-              `❌ CRITICAL: Failed to send alert email for ${alertData.server.url} to ${alertData.userEmail}:`,
+              `❌ CRITICAL: Failed to send 3-strike alert email for ${alertData.server.url} to ${alertData.userEmail}:`,
               error
             );
 
-            // FIXED: If email sending fails, reset alertSent to false so we can try again next time
+            // If email sending fails, reset alertSent and isPaused so we can try again
             try {
               await Server.findByIdAndUpdate(
                 alertData.serverId,
-                { alertSent: false },
+                {
+                  alertSent: false,
+                  isPaused: false,
+                  pausedAt: null,
+                },
                 { new: true }
               );
               console.log(
-                `Reset alertSent flag for server ${alertData.server.url} due to email failure`
+                `Reset alert flags for server ${alertData.server.url} due to email failure`
               );
             } catch (resetError) {
               console.error(
-                `Failed to reset alertSent flag for server ${alertData.serverId}:`,
+                `Failed to reset alert flags for server ${alertData.serverId}:`,
                 resetError
               );
             }
           }
         }
 
-        console.log(`Processed batch: ${emailAlerts.length} alerts sent`);
+        console.log(
+          `Processed batch: ${emailAlerts.length} 3-strike alerts sent`
+        );
 
         // Small delay between batches
         if (batches.indexOf(batch) < batches.length - 1) {
@@ -1442,7 +1344,7 @@ app.get('/server/stats', authenticateToken, async (req, res) => {
     const servers = await Server.find({
       userEmail: req.user.email,
       isActive: true,
-    }).select('_id url index status uptime');
+    }).select('_id url index status uptime consecutiveFailures isPaused');
 
     const serverIds = servers.map((s) => s._id);
 
@@ -1506,6 +1408,7 @@ app.get('/server/stats', authenticateToken, async (req, res) => {
     const overall = {
       totalServers: servers.length,
       activeServers: servers.filter((s) => s.status === 'online').length,
+      pausedServers: servers.filter((s) => s.isPaused === true).length,
       totalPings: overallStats.totalPings,
       overallUptime:
         overallStats.totalPings > 0
@@ -1525,47 +1428,6 @@ app.get('/server/stats', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Get server stats error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Get system-wide statistics (Admin only)
-app.get('/admin/stats', async (req, res) => {
-  try {
-    const { adminKey } = req.query;
-
-    if (adminKey !== ADMIN_ACCESS_KEY) {
-      return res.status(401).json({ error: 'Invalid admin access key' });
-    }
-
-    const [userCount, serverCount, totalPings, recentActivity] =
-      await Promise.all([
-        User.countDocuments(),
-        Server.countDocuments({ isActive: true }),
-        PingHistory.countDocuments(),
-        PingHistory.countDocuments({
-          pingTime: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        }),
-      ]);
-
-    const topUsers = await Server.aggregate([
-      { $match: { isActive: true } },
-      { $group: { _id: '$userEmail', serverCount: { $sum: 1 } } },
-      { $sort: { serverCount: -1 } },
-      { $limit: 10 },
-    ]);
-
-    res.json({
-      system: {
-        totalUsers: userCount,
-        totalActiveServers: serverCount,
-        totalPings: totalPings,
-        pingsLast24h: recentActivity,
-      },
-      topUsers,
-    });
-  } catch (error) {
-    console.error('Get admin stats error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1602,9 +1464,7 @@ connectToDb()
       console.log('📊 Available routes:');
       console.log('🔐 Authentication:');
       console.log('  POST /auth/request - Request device verification');
-      console.log(
-        '  GET /auth/verify-email - Email verification endpoint (NEW)'
-      );
+      console.log('  GET /auth/verify-email - Email verification endpoint');
       console.log('  POST /auth/verify - Verify device with token');
       console.log('  GET /auth/isVerified - Check if device is verified');
       console.log('  POST /auth/logout - Logout and deactivate device');
@@ -1615,27 +1475,24 @@ connectToDb()
         '  PUT /server/edit/:id - Edit server URL and alert settings'
       );
       console.log('  DELETE /server/delete/:id - Delete server');
-      console.log('  POST /server/restart/:id - Restart server monitoring');
+      console.log(
+        '  POST /server/restart/:id - Restart server monitoring (resets 3-strike system)'
+      );
       console.log('  GET /server/history/:id - Get server ping history');
       console.log('  GET /server/stats - Get aggregated server statistics');
-      console.log('🔧 Admin:');
-      console.log('  POST /admin/restart - Admin restart all servers');
-      console.log(
-        '  POST /admin/updateMaxServers - Update user max server count'
-      );
-      console.log('  GET /admin/stats - Get system-wide statistics');
       console.log('💚 Health:');
       console.log('  GET /health - Health check');
-      console.log('\n✅ FIXES APPLIED:');
-      console.log('  • Per-user unique URL validation with compound index');
-      console.log('  • Enhanced URL validation (https:// required)');
-      console.log('  • Fixed email verification flow (no redirect from email)');
+      console.log('\n✅ NEW 3-STRIKE SYSTEM IMPLEMENTED:');
+      console.log('  • Server monitoring pauses after 3 consecutive failures');
+      console.log('  • Single alert email sent when server reaches 3 strikes');
+      console.log('  • No more monitoring until user manually restarts');
+      console.log('  • Enhanced email templates with modern styling');
+      console.log('  • Restart button resets consecutive failure counter');
       console.log(
-        '  • Improved email alert logic (send only once per downtime)'
+        '  • Added consecutiveFailures and isPaused fields to server schema'
       );
-      console.log('  • Better error handling for email failures');
-      console.log('  • Enhanced email templates with better styling');
-      console.log('  • Automatic alertSent reset when email fails');
+      console.log('  • Paused servers excluded from monitoring loop');
+      console.log('  • Alert sent only once when threshold is reached');
     });
   })
   .catch((error) => {
@@ -1646,20 +1503,6 @@ connectToDb()
 // Graceful shutdown
 const gracefulShutdown = (signal) => {
   console.log(`${signal} received, shutting down gracefully`);
-
-  // Stop accepting new connections
-  // const server = app.listen(PORT);
-  // server.close(() => {
-  //   console.log('HTTP server closed');
-
-  //   // Close database connection
-  //   // mongoose.connection.close(false, () => {
-  //   //   console.log('MongoDB connection closed');
-  //   //   process.exit(0);
-  //   // });
-  // });
-
-  // Force close after 10 seconds
   setTimeout(() => {
     console.error(
       'Could not close connections in time, forcefully shutting down'
@@ -1668,18 +1511,13 @@ const gracefulShutdown = (signal) => {
   }, 10000);
 };
 
-// process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-// process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  // gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 module.exports = app;
