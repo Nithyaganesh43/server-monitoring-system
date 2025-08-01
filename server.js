@@ -39,6 +39,22 @@ const transporter = nodemailer.createTransport({
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// Validate critical environment variables
+if (!JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET environment variable is not set');
+  process.exit(1);
+}
+
+if (!process.env.MONGO_URL) {
+  console.error('FATAL ERROR: MONGO_URL environment variable is not set');
+  process.exit(1);
+}
+
+if (!process.env.EMAIL_ID || !process.env.EMAIL_APP_PASSWORD) {
+  console.error('FATAL ERROR: EMAIL_ID and EMAIL_APP_PASSWORD environment variables are required');
+  process.exit(1);
+}
+
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   maxServerCount: { type: Number, default: 10 },
@@ -229,15 +245,39 @@ const maintainPingHistoryLimit = async (serverId, limit = 150000) => {
     const count = await PingHistory.countDocuments({ serverId });
     if (count > limit) {
       const excessCount = count - limit;
-      const oldestPings = await PingHistory.find({ serverId })
-        .sort({ pingTime: 1 })
-        .limit(excessCount)
-        .select('_id');
-
-      const idsToDelete = oldestPings.map((ping) => ping._id);
-      await PingHistory.deleteMany({ _id: { $in: idsToDelete } });
+      
+      // Use batch deletion to avoid memory issues with large datasets
+      const batchSize = 1000;
+      let deletedCount = 0;
+      
+      while (deletedCount < excessCount) {
+        const currentBatchSize = Math.min(batchSize, excessCount - deletedCount);
+        
+        // Delete oldest records in batches to prevent memory overload
+        const result = await PingHistory.deleteMany(
+          { serverId },
+          {
+            sort: { pingTime: 1 },
+            limit: currentBatchSize
+          }
+        );
+        
+        if (result.deletedCount === 0) {
+          break; // No more records to delete
+        }
+        
+        deletedCount += result.deletedCount;
+        
+        // Small delay between batches to prevent overwhelming the database
+        if (deletedCount < excessCount) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
     }
-  } catch (error) {}
+  } catch (error) {
+    // Log errors instead of silently swallowing them
+    console.error(`Error maintaining ping history limit for server ${serverId}:`, error.message);
+  }
 };
 
 const authenticateToken = async (req, res, next) => {
@@ -364,6 +404,14 @@ app.get('/auth/verify-email', async (req, res) => {
     }
 
     const permanentToken = generateToken(email, deviceId);
+
+    // Set authentication cookie for successful verification
+    res.cookie('authToken', permanentToken, {
+      httpOnly: true,
+      secure: true,
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      sameSite: 'None',
+    });
 
     res.send(generateSuccessPage(permanentToken));
   } catch (error) {
