@@ -9,10 +9,9 @@ const generateVerificationEmail = (verificationUrl) => {
       <title>Device Verification - WatchTower 24/7</title>
     </head>
     <body style="margin:0;padding:0;background:linear-gradient(135deg,#000428 0%,#004e92 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="background-image:url('https://res.cloudinary.com/dflgxymvs/image/upload/v1753939083/lecrowninteriors/dnxufxylqjzxsnsa8jkg.avif');background-size:cover;background-position:center;min-height:100vh;padding:40px 20px;">
         <div style="max-width:500px;margin:0 auto;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);border-radius:16px;padding:40px;border:1px solid rgba(255,255,255,0.1);">
           <div style="text-align:center;margin-bottom:30px;">
-            <h1 style="color:#00d4ff;margin:0;font-size:28px;font-weight:700;">WatchTower 24/7</h1>
+            <h1 style="color:#00d4ff;margin:0;font-size:28px;font-weight:700;">WatchTower</h1>
             <p style="color:#a0a9c0;margin:10px 0 0;font-size:14px;">Server Monitoring Platform</p>
           </div>
           
@@ -25,16 +24,7 @@ const generateVerificationEmail = (verificationUrl) => {
             <a href="${verificationUrl}" style="display:inline-block;background:linear-gradient(135deg,#00d4ff 0%,#0099cc 100%);color:#ffffff;text-decoration:none;padding:15px 35px;border-radius:8px;font-weight:600;font-size:16px;box-shadow:0 4px 15px rgba(0,212,255,0.3);transition:all 0.3s ease;">
               ✅ Verify Device
             </a>
-          </div>
-          
-          <div style="background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:8px;padding:15px;margin:20px 0;">
-            <p style="color:#ffc107;margin:0;font-size:14px;text-align:center;">⏱️ This link expires in 10 minutes</p>
-          </div>
-          
-          <div style="text-align:center;margin-top:30px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.1);">
-            <p style="color:#6c757d;margin:0;font-size:12px;">Didn't request this? Please ignore this email.</p>
-          </div>
-        </div>
+          </div> 
       </div>
     </body>
     </html>
@@ -56,7 +46,6 @@ const generateServerDownAlert = (
       <title>🚨 Server Down Alert - WatchTower 24/7</title>
     </head>
     <body style="margin:0;padding:0;background:linear-gradient(135deg,#000428 0%,#004e92 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="background-image:url('https://res.cloudinary.com/dflgxymvs/image/upload/v1753939083/lecrowninteriors/dnxufxylqjzxsnsa8jkg.avif');background-size:cover;background-position:center;min-height:100vh;padding:40px 20px;">
         <div style="max-width:600px;margin:0 auto;background:rgba(0,0,0,0.9);backdrop-filter:blur(15px);border-radius:16px;border:1px solid rgba(220,53,69,0.3);overflow:hidden;">
           
           <!-- Header -->
@@ -123,7 +112,6 @@ const generateServerDownAlert = (
               </p>
             </div>
           </div>
-        </div>
       </div>
     </body>
     </html>
@@ -140,7 +128,6 @@ const generateSuccessPage = (permanentToken) => {
       <title>Device Verified - WatchTower 24/7</title>
     </head>
     <body style="margin:0;padding:0;background:linear-gradient(135deg,#000428 0%,#004e92 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="background-image:url('https://res.cloudinary.com/dflgxymvs/image/upload/v1753939083/lecrowninteriors/dnxufxylqjzxsnsa8jkg.avif');background-size:cover;background-position:center;min-height:100vh;padding:40px 20px;display:flex;align-items:center;justify-content:center;">
         <div style="max-width:450px;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);border-radius:16px;padding:40px;text-align:center;border:1px solid rgba(40,167,69,0.3);">
           <div style="margin-bottom:25px;">
             <div style="width:80px;height:80px;background:linear-gradient(135deg,#28a745 0%,#20c997 100%);border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(40,167,69,0.3);">
@@ -161,7 +148,6 @@ const generateSuccessPage = (permanentToken) => {
             <p style="color:#6c757d;margin:0;font-size:12px;">
               Powered by <strong style="color:#00d4ff;">WatchTower 24/7</strong>
             </p>
-          </div>
         </div>
       </div>
       
@@ -189,7 +175,6 @@ const generateErrorPage = (title, message) => {
       <title>${title} - WatchTower 24/7</title>
     </head>
     <body style="margin:0;padding:0;background:linear-gradient(135deg,#000428 0%,#004e92 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="background-image:url('https://res.cloudinary.com/dflgxymvs/image/upload/v1753939083/lecrowninteriors/dnxufxylqjzxsnsa8jkg.avif');background-size:cover;background-position:center;min-height:100vh;padding:40px 20px;display:flex;align-items:center;justify-content:center;">
         <div style="max-width:450px;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);border-radius:16px;padding:40px;text-align:center;border:1px solid rgba(220,53,69,0.3);">
           <div style="margin-bottom:25px;">
             <div style="width:80px;height:80px;background:linear-gradient(135deg,#dc3545 0%,#c82333 100%);border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(220,53,69,0.3);">
@@ -207,7 +192,6 @@ const generateErrorPage = (title, message) => {
               Powered by <strong style="color:#00d4ff;">WatchTower 24/7</strong>
             </p>
           </div>
-        </div>
       </div>
     </body>
     </html>
