@@ -5,8 +5,8 @@ const createTransporter = () => {
     service: 'gmail',
     auth: {
       user: process.env.EMAIL_ID,
-      pass: process.env.EMAIL_APP_PASSWORD
-    }
+      pass: process.env.EMAIL_APP_PASSWORD,
+    },
   });
 };
 
@@ -17,11 +17,11 @@ const sendEmail = async (to, subject, html) => {
     const mailOptions = {
       from: {
         name: 'Watchtower 24/7',
-        address: process.env.EMAIL_ID
+        address: process.env.EMAIL_ID,
       },
       to: to.toLowerCase().trim(),
       subject,
-      html
+      html,
     };
 
     const result = await transporter.sendMail(mailOptions);
@@ -34,8 +34,10 @@ const sendEmail = async (to, subject, html) => {
 };
 
 const generateVerificationEmail = (token, email) => {
-  const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify?token=${token}`;
-  
+  const verificationUrl = `${
+    process.env.FRONTEND_URL || 'https://watchtower-24-7.vercel.app'
+  }/verify?token=${token}`;
+
   return `
     <!DOCTYPE html>
     <html>
@@ -79,8 +81,14 @@ const generateServerDownAlert = (server, errorMessage) => {
                 <p><strong>Server:</strong> ${server.url}</p>
                 <p><strong>Status:</strong> Offline</p>
                 <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-                <p><strong>Consecutive Failures:</strong> ${server.consecutiveFailures}</p>
-                ${errorMessage ? `<p><strong>Error:</strong> ${errorMessage}</p>` : ''}
+                <p><strong>Consecutive Failures:</strong> ${
+                  server.consecutiveFailures
+                }</p>
+                ${
+                  errorMessage
+                    ? `<p><strong>Error:</strong> ${errorMessage}</p>`
+                    : ''
+                }
             </div>
             <p>Your server is currently unreachable. Please check your server and network configuration.</p>
             <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
@@ -96,5 +104,5 @@ const generateServerDownAlert = (server, errorMessage) => {
 module.exports = {
   sendEmail,
   generateVerificationEmail,
-  generateServerDownAlert
+  generateServerDownAlert,
 };

@@ -1,0 +1,121 @@
+{
+  "info": {
+    "name": "Watchtower 24/7 API",
+    "_postman_id": "c1fbd7a2-7a6b-4f88-9e7a-0b1f97d80c99",
+    "description": "Postman collection for testing Watchtower 24/7 API endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check - /ping",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ping"
+      }
+    },
+    {
+      "name": "Auth - Request Verification Email",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"deviceId\": \"{{deviceId}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/request"
+      }
+    },
+    {
+      "name": "Auth - Verify Device",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{verificationToken}}\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/verify"
+      }
+    },
+    {
+      "name": "Auth - Check Verification Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/auth/check?email={{email}}&deviceId={{deviceId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["auth", "check"],
+          "query": [
+            { "key": "email", "value": "{{email}}" },
+            { "key": "deviceId", "value": "{{deviceId}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Auth - Logout",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/auth/logout"
+      }
+    },
+    {
+      "name": "Servers - Add Server",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://example.com\",\n  \"alertEnabled\": true\n}"
+        },
+        "url": "{{baseUrl}}/servers/add"
+      }
+    },
+    {
+      "name": "Servers - Get All Servers",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/servers"
+      }
+    },
+    {
+      "name": "Servers - Remove Server",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": "{{baseUrl}}/servers/{{serverId}}"
+      }
+    },
+    {
+      "name": "Servers - Toggle Server Alerts",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"alertEnabled\": false\n}"
+        },
+        "url": "{{baseUrl}}/servers/{{serverId}}/alert"
+      }
+    },
+    {
+      "name": "Servers - Get Server Status Summary",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/servers/status"
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://servermonitoringsystembyng.onrender.com" },
+    { "key": "email", "value": "nithyaganesh4343@gmail.com" },
+    { "key": "deviceId", "value": "my-device-123" },
+    { "key": "verificationToken", "value": "" },
+    { "key": "serverId", "value": "" }
+  ]
+}
