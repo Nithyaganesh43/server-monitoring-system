@@ -21,9 +21,9 @@ const userSchema = new mongoose.Schema({
   },
   maxServers: {
     type: Number,
-    default: 10,
+    default: 100,
     min: 1,
-    max: 100
+    max: 1000
   }
 }, {
   timestamps: true
