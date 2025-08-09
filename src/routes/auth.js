@@ -6,11 +6,15 @@ const { sendEmail, generateVerificationEmail } = require('../utils/email');
 const { validateEmail, validateDeviceId } = require('../utils/validation');
 const { generateToken, generateVerificationToken } = require('../utils/jwt');
 const { authenticateToken } = require('../middleware/auth');
-
+const { rateLimiter } = require('../middleware/rateLimiter');
 const router = express.Router();
 
+const authenticateRateLimiter = rateLimiter(10, 5 * 60 * 1000);
+const checkRateLimiter = rateLimiter(100, 5 * 60 * 1000);
+
+
 // Request verification email
-router.post('/request', async (req, res) => {
+router.post('/request',authenticateRateLimiter, async (req, res) => {
   try {
     const { email, deviceId } = req.body;
 
@@ -74,7 +78,7 @@ router.post('/request', async (req, res) => {
 
 
 // Verify token
-router.post('/verify', async (req, res) => {
+router.post('/verify',authenticateRateLimiter, async (req, res) => {
   try {
     const token = req.body.token;
     if (!token) {
@@ -123,7 +127,7 @@ router.post('/verify', async (req, res) => {
 });
 
 // Check if device is verified
-router.get('/check', async (req, res) => {
+router.get('/check',checkRateLimiter, async (req, res) => {
   try {
     const { deviceId, email } = req.query;
 

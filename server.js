@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 app.use(require('./src/routes/serverInit'));
 
-app.use('/auth', rateLimiter(10, 5 * 60 * 1000), authRoutes);
+app.use('/auth', authRoutes);
 app.use('/servers', rateLimiter(50, 5 * 60 * 1000), serverRoutes);
 
 app.use((error, req, res, next) => {
