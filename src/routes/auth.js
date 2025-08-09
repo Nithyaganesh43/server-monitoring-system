@@ -14,11 +14,13 @@ router.post('/request', async (req, res) => {
   try {
     const { email, deviceId } = req.body;
 
+    // Validate email
     const emailValidation = validateEmail(email);
     if (!emailValidation.valid) {
       return res.status(400).json({ error: emailValidation.error });
     }
 
+    // Validate deviceId
     const deviceValidation = validateDeviceId(deviceId);
     if (!deviceValidation.valid) {
       return res.status(400).json({ error: deviceValidation.error });
@@ -27,39 +29,53 @@ router.post('/request', async (req, res) => {
     const normalizedEmail = emailValidation.normalizedEmail;
     const normalizedDeviceId = deviceValidation.normalizedDeviceId;
 
-    const verificationToken = generateVerificationToken(normalizedEmail, normalizedDeviceId);
+    // Generate verification token
+    const verificationToken = generateVerificationToken(
+      normalizedEmail,
+      normalizedDeviceId
+    );
 
+    // Store or update pending auth request
     await PendingAuth.findOneAndUpdate(
       { email: normalizedEmail, deviceId: normalizedDeviceId },
       {
         token: verificationToken,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min expiry
       },
       { upsert: true, new: true }
     );
 
-    await sendEmail(
+    // Send verification email
+    const emailSent = await sendEmail(
       normalizedEmail,
       'Watchtower 24/7 - Verify Your Device',
       generateVerificationEmail(verificationToken, normalizedEmail)
     );
 
-    res.json({
+    if (!emailSent) {
+      return res
+        .status(500)
+        .json({ error: 'Failed to send verification email' });
+    }
+
+    // Success response
+    res.status(200).json({
       message: 'Verification email sent successfully',
-      expiresIn: 600
+      expiresIn: 600,
     });
   } catch (error) {
     console.error('Auth request error:', error);
     res.status(500).json({
-      error: 'Failed to send verification email. Please try again.'
+      error: 'Internal server error. Please try again later.',
     });
   }
 });
 
+
 // Verify token
 router.post('/verify', async (req, res) => {
   try {
-    const { token } = req.body;
+    const token = req.query.token;
     if (!token) {
       return res.status(400).json({ error: 'Token is required' });
     }
@@ -89,9 +105,9 @@ router.post('/verify', async (req, res) => {
 
     const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+      secure: 'true',
+      maxAge: 365 * 24 * 60 * 60 * 1000, // 365 days
+      sameSite:'none'  
     };
 
     res.cookie('authToken', permanentToken, cookieOptions);
@@ -131,9 +147,9 @@ router.get('/check', async (req, res) => {
       
       const cookieOptions = {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+        secure: 'true',
+        maxAge: 365 * 24 * 60 * 60 * 1000,
+        sameSite: 'none',
       };
 
       res.cookie('authToken', permanentToken, cookieOptions);
@@ -152,8 +168,8 @@ router.post('/logout', authenticateToken, async (req, res) => {
   try {
     const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+      secure: 'true',
+      sameSite: 'none',
     };
 
     res.clearCookie('authToken', cookieOptions);

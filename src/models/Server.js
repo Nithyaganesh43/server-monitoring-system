@@ -41,8 +41,5 @@ const serverSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
-
-serverSchema.index({ userEmail: 1, url: 1 }, { unique: true });
-serverSchema.index({ status: 1, alertEnabled: 1 });
-
+ 
 module.exports = mongoose.model('Server', serverSchema);

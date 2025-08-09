@@ -26,7 +26,5 @@ const pendingAuthSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
-
-pendingAuthSchema.index({ email: 1, deviceId: 1 }, { unique: true });
-
+ 
 module.exports = mongoose.model('PendingAuth', pendingAuthSchema);

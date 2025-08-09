@@ -26,40 +26,31 @@ const sendEmail = async (to, subject, html) => {
 
     const result = await transporter.sendMail(mailOptions);
     console.log('Email sent successfully:', result.messageId);
-    return result;
+    return true;
   } catch (error) {
     console.error('Email sending failed:', error);
-    throw error;
+    return false;
   }
 };
 
 const generateVerificationEmail = (token, email) => {
-  const verificationUrl = `${
-    process.env.FRONTEND_URL || 'https://watchtower-24-7.vercel.app'
-  }/verify?token=${token}`;
+  const verificationUrl = `https://watchtower-24-7.vercel.app/verify?token=${token}`;
 
   return `
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Verify Your Device - Watchtower 24/7</title>
+        <title>Verify Device - Watchtower 24/7</title>
     </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #2563eb;">Verify Your Device</h2>
-            <p>Hello,</p>
-            <p>Please click the link below to verify your device for Watchtower 24/7:</p>
-            <div style="margin: 20px 0;">
-                <a href="${verificationUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Device</a>
-            </div>
-            <p>Or copy and paste this link in your browser:</p>
-            <p style="word-break: break-all; color: #666;">${verificationUrl}</p>
-            <p><strong>This link will expire in 10 minutes.</strong></p>
-            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-            <p style="color: #666; font-size: 14px;">
-                If you didn't request this verification, please ignore this email.
-            </p>
+    <body style="background-color:#000; color:#dbeafe; font-family:Arial, sans-serif; margin:0; padding:0;">
+        <div style="max-width:600px; margin:40px auto; padding:20px; background-color:#0f172a; border:2px solid #2563eb; border-radius:8px;">
+            <h2 style="color:#2563eb; margin-top:0;">Verify Your Device</h2>
+            <p style="color:#dbeafe;">Please click the button below to verify your device for Watchtower 24/7:</p>
+            <div style="margin:20px 0;">
+                <a href="${verificationUrl}" style="background-color:#2563eb; color:white; padding:12px 24px; text-decoration:none; border:2px solid #2563eb; border-radius:4px; font-weight:bold;">Verify Device</a>
+            </div> 
+            <p style="color:#f87171; font-weight:bold; font-size:14px;">This link will expire in 10 minutes.</p>
         </div>
     </body>
     </html>

@@ -26,52 +26,45 @@ router.post('/add', authenticateToken, async (req, res) => {
     // Check for existing URL
     const existingServer = await Server.findOne({
       userEmail: req.user.email,
-      url: normalizedUrl
+      url: normalizedUrl,
     });
 
     if (existingServer) {
       return res.status(400).json({
-        error: 'This URL is already being monitored by you.'
+        error: 'This URL is already being monitored by you.',
       });
     }
 
     // Check server count limit
     const serverCount = await Server.countDocuments({
-      userEmail: req.user.email
+      userEmail: req.user.email,
     });
 
     if (serverCount >= req.user.maxServers) {
       return res.status(400).json({
-        error: `Maximum server limit (${req.user.maxServers}) reached.`
+        error: `Maximum server limit (${req.user.maxServers}) reached.`,
       });
     }
+
+    // Initial ping
+    const pingResult = await pingServer(normalizedUrl);
 
     const server = new Server({
       userEmail: req.user.email,
       url: normalizedUrl,
       alertEnabled: Boolean(alertEnabled),
-      status: 'checking'
-    });
-
-    await server.save();
-
-    // Initial ping
-    const pingResult = await pingServer(normalizedUrl);
-    
-    await Server.findByIdAndUpdate(server._id, {
       status: pingResult.success ? 'online' : 'offline',
       responseTime: pingResult.responseTime,
       lastCheck: new Date(),
-      consecutiveFailures: pingResult.success ? 0 : 1
+      consecutiveFailures: pingResult.success ? 0 : 1,
     });
 
-    const updatedServer = await Server.findById(server._id).select(
-      'url status responseTime lastCheck alertEnabled consecutiveFailures'
-    );
+    await server.save();
+ 
 
     res.status(201).json({
       message: 'Server added successfully',
-      server: updatedServer
+      server,
     });
   } catch (error) {
     console.error('Server creation error:', error);
@@ -85,7 +78,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const servers = await Server.find({
       userEmail: req.user.email
     }).select(
-      'url status responseTime lastCheck alertEnabled consecutiveFailures createdAt'
+      '_id url status responseTime lastCheck alertEnabled consecutiveFailures createdAt'
     ).sort({ createdAt: 1 });
 
     res.json({
@@ -128,40 +121,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     console.error('Server deletion error:', error);
     res.status(500).json({ error: 'Failed to remove server' });
   }
-});
-
-// Toggle alerts
-router.put('/:id/alert', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { alertEnabled } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid server ID format' });
-    }
-
-    const server = await Server.findOneAndUpdate(
-      { _id: id, userEmail: req.user.email },
-      { 
-        alertEnabled: Boolean(alertEnabled),
-        alertSent: false // Reset alert sent status
-      },
-      { new: true }
-    ).select('url alertEnabled');
-
-    if (!server) {
-      return res.status(404).json({ error: 'Server not found' });
-    }
-
-    res.json({
-      message: 'Alert settings updated successfully',
-      server
-    });
-  } catch (error) {
-    console.error('Server alert toggle error:', error);
-    res.status(500).json({ error: 'Failed to update alert settings' });
-  }
-});
+}); 
 
 // Get server status summary
 router.get('/status', authenticateToken, async (req, res) => {

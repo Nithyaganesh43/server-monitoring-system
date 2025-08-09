@@ -1,121 +1,156 @@
 {
   "info": {
-    "name": "Watchtower 24/7 API",
-    "_postman_id": "c1fbd7a2-7a6b-4f88-9e7a-0b1f97d80c99",
-    "description": "Postman collection for testing Watchtower 24/7 API endpoints.",
+    "name": "Watchtower API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "Health Check - /ping",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/ping"
-      }
-    },
-    {
-      "name": "Auth - Request Verification Email",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"email\": \"{{email}}\",\n  \"deviceId\": \"{{deviceId}}\"\n}"
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Request Verification Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "request"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"user@example.com\", \"deviceId\": \"device123\"}"
+            }
+          }
         },
-        "url": "{{baseUrl}}/auth/request"
-      }
-    },
-    {
-      "name": "Auth - Verify Device",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"token\": \"{{verificationToken}}\"\n}"
+        {
+          "name": "Verify Token",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify?token={{token}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify"],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{token}}"
+                }
+              ]
+            }
+          }
         },
-        "url": "{{baseUrl}}/auth/verify"
-      }
-    },
-    {
-      "name": "Auth - Check Verification Status",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/auth/check?email={{email}}&deviceId={{deviceId}}",
-          "host": ["{{baseUrl}}"],
-          "path": ["auth", "check"],
-          "query": [
-            { "key": "email", "value": "{{email}}" },
-            { "key": "deviceId", "value": "{{deviceId}}" }
-          ]
+        {
+          "name": "Check Verification",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/check?deviceId=device123&email=user@example.com",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "check"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "device123"
+                },
+                {
+                  "key": "email",
+                  "value": "user@example.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            }
+          }
         }
-      }
+      ]
     },
     {
-      "name": "Auth - Logout",
-      "request": {
-        "method": "POST",
-        "header": [],
-        "url": "{{baseUrl}}/auth/logout"
-      }
-    },
-    {
-      "name": "Servers - Add Server",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"url\": \"https://example.com\",\n  \"alertEnabled\": true\n}"
+      "name": "Servers",
+      "item": [
+        {
+          "name": "Add Server",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/servers/add",
+              "host": ["{{baseUrl}}"],
+              "path": ["servers", "add"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"url\": \"https://example.com\", \"alertEnabled\": true}"
+            }
+          }
         },
-        "url": "{{baseUrl}}/servers/add"
-      }
-    },
-    {
-      "name": "Servers - Get All Servers",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/servers"
-      }
-    },
-    {
-      "name": "Servers - Remove Server",
-      "request": {
-        "method": "DELETE",
-        "header": [],
-        "url": "{{baseUrl}}/servers/{{serverId}}"
-      }
-    },
-    {
-      "name": "Servers - Toggle Server Alerts",
-      "request": {
-        "method": "PUT",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"alertEnabled\": false\n}"
+        {
+          "name": "Get All Servers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/servers",
+              "host": ["{{baseUrl}}"],
+              "path": ["servers"]
+            }
+          }
         },
-        "url": "{{baseUrl}}/servers/{{serverId}}/alert"
-      }
-    },
-    {
-      "name": "Servers - Get Server Status Summary",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": "{{baseUrl}}/servers/status"
-      }
+        {
+          "name": "Delete Server",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/servers/{{serverId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["servers", "{{serverId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Server Status Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/servers/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["servers", "status"]
+            }
+          }
+        }
+      ]
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "https://servermonitoringsystembyng.onrender.com" },
-    { "key": "email", "value": "nithyaganesh4343@gmail.com" },
-    { "key": "deviceId", "value": "my-device-123" },
-    { "key": "verificationToken", "value": "" },
-    { "key": "serverId", "value": "" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "serverId",
+      "value": ""
+    }
   ]
 }
