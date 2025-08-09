@@ -33,7 +33,7 @@ const sendEmail = async (to, subject, html) => {
 };
 
 const generateVerificationEmail = (token, email) => {
-  const verificationUrl = `https://watchtower-24-7.vercel.app/verify?token=${token}`;
+  const verificationUrl = `https://servermonitoringsystembyng.onrender.com/verify?token=${token}`;
 
   return `
     <!DOCTYPE html>
