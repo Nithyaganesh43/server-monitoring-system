@@ -62,6 +62,7 @@ router.post('/request', async (req, res) => {
     res.status(200).json({
       message: 'Verification email sent successfully',
       expiresIn: 600,
+      token: verificationToken,
     });
   } catch (error) {
     console.error('Auth request error:', error);
