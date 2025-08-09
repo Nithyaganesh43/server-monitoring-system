@@ -37,7 +37,40 @@ base url https://servermonitoringsystembyng.onrender.com
 
 { "error": "Invalid email format" }
 
- 
+
+---
+
+### **2. Verify Device**
+
+**API:** `/auth/verify?token=<verification-token>`
+**Method:** `POST`
+
+**Request:**
+
+* Query param: `token` (required)
+
+**Validations:**
+
+* Token must be valid and not expired.
+* Token must match a pending authentication request.
+
+**Response (200):**
+
+
+{
+  "message": "Device verified successfully",
+  "verified": true
+}
+
+
+**Response (400 / 500):**
+
+
+{ "error": "Invalid or expired token" }
+
+
+---
+
 ### **3. Check Device Verification**
 
 **API:** `/auth/check`
