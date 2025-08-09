@@ -9,8 +9,8 @@ const { authenticateToken } = require('../middleware/auth');
 const { rateLimiter } = require('../middleware/rateLimiter');
 const router = express.Router();
 
-const authenticateRateLimiter = rateLimiter(10, 5 * 60 * 1000);
-const checkRateLimiter = rateLimiter(100, 5 * 60 * 1000);
+const authenticateRateLimiter = rateLimiter(1000, 5 * 60 * 1000);
+const checkRateLimiter = rateLimiter(10000, 5 * 60 * 1000);
 
 
 // Request verification email
