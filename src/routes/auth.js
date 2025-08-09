@@ -76,7 +76,7 @@ router.post('/request', async (req, res) => {
 // Verify token
 router.post('/verify', async (req, res) => {
   try {
-    const token = req.query.token;
+    const token = req.body.token;
     if (!token) {
       return res.status(400).json({ error: 'Token is required' });
     }
