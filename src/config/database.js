@@ -6,7 +6,7 @@ const connectToDb = async () => {
 
   while (retries < maxRetries) {
     try {
-      await mongoose.connect(process.env.MONGO_URL, { 
+      await mongoose.connect(process.env.MONGO_URL+'PRODUCTION', { 
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 10000
       });
