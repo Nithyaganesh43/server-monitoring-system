@@ -80,7 +80,7 @@ router.post('/request',authenticateRateLimiter, async (req, res) => {
 // Verify token
 router.post('/verify',authenticateRateLimiter, async (req, res) => {
   try {
-    const token = req.body.token;
+    const token = req.query.token;
     if (!token) {
       return res.status(400).json({ error: 'Token is required' });
     }
